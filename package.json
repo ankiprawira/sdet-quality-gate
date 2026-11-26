@@ -9,6 +9,8 @@
         "test:ui": "playwright test --ui",
         "test:web": "playwright test --project=chromium",
         "test:api": "playwright test --project=api-tests",
+        "generate:api": "node scripts/generate-api-tests.mjs",
+        "generate:e2e": "node scripts/generate-e2e-tests.mjs",
         "test:staging": "cross-env TEST_ENV=staging playwright test",
         "test:uat": "cross-env TEST_ENV=uat playwright test",
         "test:debug": "playwright test --debug",
