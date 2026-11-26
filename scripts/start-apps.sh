@@ -14,7 +14,10 @@ if [[ -f package-lock.json ]]; then
 else
   npm install
 fi
-npm run dev > /tmp/web.log 2>&1 &
+# Production server. `next dev` on the runner never finishes hydrating:
+# the browser's HMR websocket fails and React never attaches to the inputs.
+npm run build
+npm run start > /tmp/web.log 2>&1 &
 echo $! > /tmp/web.pid
 
 wait_for() {
