@@ -177,8 +177,8 @@ function assertFiles(files, { apiKey, pages, expectedRels, source }) {
 
     for (const page of pages) {
         const source = files.get(page.file);
-        if (!source.includes(`class ${page.className}`) || !source.includes(page.locators) || !source.includes('console.log')) {
-            console.error(`${page.file} is missing ${page.className}, ${page.locators}, or console.log. Nothing was written.`);
+        if (!source.includes(`class ${page.className}`) || !source.includes(page.locators) || !source.includes('console.log') || !source.includes('pressSequentially') || source.includes('.blur(')) {
+            console.error(`${page.file} must include ${page.className}, ${page.locators}, console.log, and pressSequentially, and must not call blur(). Nothing was written.`);
             process.exit(1);
         }
         if (source.includes(apiKey)) {
