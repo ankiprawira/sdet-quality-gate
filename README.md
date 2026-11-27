@@ -33,6 +33,7 @@ A pull request runs `.github/workflows/quality-gate.yml` (the copy for this exer
 4. Runs `npm run generate:api` and `npm run generate:e2e`.
 5. Runs the `api-tests` and `chromium` Playwright projects against `http://127.0.0.1:8080` and `http://127.0.0.1:3000`.
 6. Uploads the HTML report even when tests fail.
+7. Updates a single pull request comment with generated, passed, and failed counts for the API spec and the end-to-end spec, plus a link to the Actions run.
 
 A failed step fails the **gate** check. Branch protection on `master` requires that check, so the pull request cannot merge.
 

@@ -6,6 +6,9 @@ on:
 jobs:
   gate:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
@@ -38,6 +41,7 @@ jobs:
         run: npm run generate:e2e
 
       - name: Run API and web tests
+        id: tests
         env:
           CI: "true"
           STAGING_API_URL: http://127.0.0.1:8080
@@ -53,3 +57,79 @@ jobs:
             playwright-report
             test-results
           if-no-files-found: ignore
+
+      - name: Comment on the pull request
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- quality-gate -->';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const suites = [
+              { label: 'API', file: 'tests/api/payment-api.spec.ts', match: 'payment-api.spec.ts' },
+              { label: 'E2E', file: 'tests/web/e2e_web.spec.ts', match: 'e2e_web.spec.ts' },
+            ];
+            const generated = (file) => {
+              if (!fs.existsSync(file)) return 0;
+              const source = fs.readFileSync(file, 'utf8');
+              return (source.match(/\btest\s*\(/g) || []).length;
+            };
+            const xml = fs.existsSync('test-results/results.xml')
+              ? fs.readFileSync('test-results/results.xml', 'utf8')
+              : '';
+            const counts = (needle) => {
+              if (!xml) return { passed: '—', failed: '—' };
+              const cases = [...xml.matchAll(/<testcase\b([^>]*)>([\s\S]*?)<\/testcase>/g)]
+                .filter((match) => match[1].includes(needle));
+              const failed = cases.filter((match) => /<(?:failure|error)\b/.test(match[2])).length;
+              const skipped = cases.filter((match) => /<skipped\b/.test(match[2])).length;
+              return { passed: cases.length - failed - skipped, failed };
+            };
+            const rows = suites.map((suite) => ({
+              ...suite,
+              generated: generated(suite.file),
+              ...counts(suite.match),
+            }));
+            const hasResults = xml.length > 0;
+            const failedTotal = rows.reduce((sum, row) => sum + (typeof row.failed === 'number' ? row.failed : 0), 0);
+            const gatePassed = hasResults && process.env.TEST_OUTCOME === 'success' && failedTotal === 0;
+            const body = [
+              marker,
+              '## Quality gate',
+              '',
+              hasResults
+                ? `**Result:** ${gatePassed ? 'passed' : 'failed'}`
+                : '**Result:** failed before tests ran. Playwright did not produce results (app startup or generation failed).',
+              '',
+              '| | Generated | Passed | Failed |',
+              '| --- | ---: | ---: | ---: |',
+              ...rows.map((row) => `| ${row.label} | ${row.generated} | ${row.passed} | ${row.failed} |`),
+              '',
+              `[Workflow run](${runUrl})`,
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => comment.body && comment.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
