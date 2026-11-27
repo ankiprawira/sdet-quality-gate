@@ -31,16 +31,16 @@ const fallbackModels = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemin
 const models = [...new Set([process.env.GEMINI_MODEL, ...fallbackModels].filter(Boolean))];
 const spec = fs.readFileSync(specPath, 'utf8');
 const prompt = fs.readFileSync(promptPath, 'utf8');
-const pathCount = countSwaggerPaths(spec);
+const responseCount = countDocumentedResponses(spec);
 
-if (pathCount === 0) {
-    console.error(`No paths found in ${specPath}`);
+if (responseCount === 0) {
+    console.error(`No documented responses found in ${specPath}`);
     process.exit(1);
 }
 
 console.log(`Model order: ${models.join(' -> ')}`);
 const { source, model } = await generateSpec({ apiKey, models, prompt, spec });
-assertSpec(source, { apiKey, pathCount });
+assertSpec(source, { apiKey, responseCount });
 
 for (const outPath of outPaths) {
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
@@ -48,22 +48,24 @@ for (const outPath of outPaths) {
 }
 
 console.log(`Generated with model ${model}.`);
-console.log(`Wrote ${pathCount} API tests to:`);
+console.log(`Wrote ${responseCount} API tests to:`);
 for (const outPath of outPaths) {
     console.log(`  ${path.relative(repoRoot, outPath)}`);
 }
 
-function countSwaggerPaths(yaml) {
+function countDocumentedResponses(yaml) {
     const lines = yaml.split('\n');
     const start = lines.findIndex((line) => line === 'paths:');
     if (start === -1) return 0;
     let count = 0;
+    let inPaths = false;
     for (let i = start + 1; i < lines.length; i++) {
         const line = lines[i];
         if (line.length > 0 && !line.startsWith(' ')) break;
-        if (/^  \/\S+:\s*$/.test(line)) count += 1;
+        inPaths = true;
+        if (/^        "[0-9]{3}":\s*$/.test(line)) count += 1;
     }
-    return count;
+    return inPaths ? count : 0;
 }
 
 async function generateSpec({ apiKey, models, prompt, spec }) {
@@ -145,7 +147,7 @@ function stripFence(text) {
     return fenced ? fenced[1].trim() : text.trim();
 }
 
-function assertSpec(source, { apiKey, pathCount }) {
+function assertSpec(source, { apiKey, responseCount }) {
     if (!source.includes("from '@playwright/test'") || !/(?<![\w.])test\s*\(/.test(source)) {
         console.error('Generated file is not a Playwright spec. Nothing was written.');
         process.exit(1);
@@ -155,9 +157,9 @@ function assertSpec(source, { apiKey, pathCount }) {
         process.exit(1);
     }
     const tests = source.match(/(?<![\w.])test\s*\(/g) || [];
-    if (tests.length !== pathCount) {
+    if (tests.length !== responseCount) {
         console.error(
-            `Expected ${pathCount} tests (one per Swagger path) but the model returned ${tests.length}. Nothing was written.`
+            `Expected ${responseCount} tests (one per documented response) but the model returned ${tests.length}. Nothing was written.`
         );
         process.exit(1);
     }
