@@ -51,7 +51,7 @@ API checks are single HTTP calls. UI checks wait with Playwright `expect` rather
 
 ## End-to-end selectors
 
-The prompt forbids label and role lookups for the inputs because the visible labels are not tied to the fields. Locators use `input[name="..."]` from the page source, and the pay button uses the accessible name `/Pay|Complete Payment/`. Assertions use a visible substring from that same source, so a class or layout change does not break the test. Typing goes through the keyboard so React `onChange` runs before Tab fires `onBlur`.
+The prompt forbids label and role lookups for the inputs because the visible labels are not tied to the fields. Locators use `input[name="..."]` from the page source, and the pay button uses the accessible name `/Pay|Complete Payment/`. Assertions use one method, `assertText`, which calls `getByText` with no `{ exact: true }` and then `toBeVisible()`. The expected string is a visible substring from that same source, so a class or layout change does not break the test. Typing goes through the keyboard so React `onChange` runs before Tab fires `onBlur`.
 
 ## Secrets
 
