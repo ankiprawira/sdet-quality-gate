@@ -181,6 +181,10 @@ function assertFiles(files, { apiKey, pages, expectedRels, source }) {
             console.error(`${page.file} must include ${page.className}, ${page.locators}, console.log, and pressSequentially, and must not call blur(). Nothing was written.`);
             process.exit(1);
         }
+        if (!source.includes('async assertText(') || source.includes('exact:') || source.includes('toContainText') || (source.match(/async assert\w+\s*\(/g) || []).some((name) => !name.startsWith('async assertText'))) {
+            console.error(`${page.file} must assert only with assertText, getByText without exact, and toBeVisible. Nothing was written.`);
+            process.exit(1);
+        }
         if (source.includes(apiKey)) {
             console.error('Generated file contains the API key. Nothing was written.');
             process.exit(1);
@@ -198,7 +202,8 @@ function assertFiles(files, { apiKey, pages, expectedRels, source }) {
         /\btest\.skip\s*\(/.test(spec) ||
         /\btest\.only\s*\(/.test(spec) ||
         /\bexpect\s*\(/.test(spec) ||
-        /\b(locator|getBy\w+|xpath)\s*\(/.test(spec)
+        /\b(locator|getBy\w+|xpath)\s*\(/.test(spec) ||
+        !spec.includes('assertText(')
     ) {
         console.error('The spec failed the safety check. Nothing was written.');
         process.exit(1);
