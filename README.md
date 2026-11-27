@@ -1,230 +1,58 @@
-# Playwright Automation Template
+# Quality gate
 
-Production-ready Playwright automation template for comprehensive Web and API testing with TypeScript
+This repository uses an LLM to generate Playwright API tests and web end-to-end checkout tests, then runs both on every pull request. A failed test fails the **gate** check and blocks the merge.
 
-## 🚀 Features
+## Prompt design
 
-- **Web UI Testing** - Cross-browser testing (Chrome, Firefox, Safari)
-- **API Testing** - REST API validation and integration testing
-- **Page Object Model** - Organized and maintainable test structure
-- **TypeScript Support** - Full type safety and IntelliSense
-- **Multiple Environments** - Staging, UAT, Production configurations
-- **Built-in Utilities** - API helpers, test utilities, and common functions
+API generation uses `scripts/prompts/api-tests.md`. The model may return only a Playwright spec. For each operation it writes one test per status listed in that operation's `responses`, including 400 and 500 when the spec documents them. A 2xx test uses the request examples. Any other documented status is sent an empty JSON object when the spec has no separate failure example, then asserts that status and the response schema examples. It must not invent a status, skip tests, or hardcode a host.
 
-## Prerequisites
+End-to-end generation uses `scripts/prompts/e2e-tests.md`. The model returns page objects and `tests/web/e2e_web.spec.ts`, split by marker lines. Selectors come from the page source: inputs by `name`, the pay control by its accessible name, and checks by visible text. The spec has no selectors of its own. One checkout page produces a negative flow and a happy flow. Fields are typed with `pressSequentially` and left with Tab, because the checkout page reads React state on blur and `fill()` does not update that state.
 
-- Node.js (version 16 or higher)
-- npm or yarn
+## Swagger to Playwright
 
-## 🛠️ Installation
+`npm run generate:api` reads `application_code/docs/swagger.yaml` and the API prompt, calls Gemini at temperature 0, and writes `tests/api/payment-api.spec.ts` and the same file under `generated_test/`. Paths, methods, example bodies, and example responses come from the spec. Playwright's `baseURL` is the environment API URL, so the generated requests stay relative (`/api/...`).
 
-### Quick Start
+## How to regenerate
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd base-playwright-automation
-
-# Install dependencies
-npm install
-
-# Install browsers
-npx playwright install
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your configuration
+export GEMINI_API_KEY=...
+# optional: export GEMINI_MODEL=...
+npm run generate:api
+npm run generate:e2e
 ```
 
-### For Web Automation
+`generate:e2e` reads every `page.tsx` under `application_code/app` and writes the page objects and web spec into both `tests/` and `generated_test/`. The generator refuses the result if the file set is wrong, the spec contains selectors or `test.skip`, a page object calls `blur()`, or the output contains the API key.
 
-```bash
-# Initialize new Playwright project with web testing setup
-npm init playwright@latest
+## How CI gates a change
 
-# Or install in existing project
-npm install -D @playwright/test
+A pull request runs `.github/workflows/quality-gate.yml` (the copy for this exercise is `scripts/github_action.yaml`). The job:
 
-# Install browsers (Chromium, Firefox, WebKit)
-npx playwright install
-```
+1. Installs Go 1.21 and Node 20 on `ubuntu-24.04`.
+2. Runs `scripts/start-apps.sh`, which starts the Go API on port 8080 and a production Next.js server on port 3000, then waits until both respond.
+3. Installs Playwright Chromium.
+4. Runs `npm run generate:api` and `npm run generate:e2e`.
+5. Runs the `api-tests` and `chromium` Playwright projects against `http://127.0.0.1:8080` and `http://127.0.0.1:3000`.
+6. Uploads the HTML report even when tests fail.
+7. Updates a single pull request comment with generated, passed, and failed counts for the API spec and the end-to-end spec, plus a link to the Actions run.
 
-### For API Testing
+A failed step fails the **gate** check. Branch protection on `master` requires that check, so the pull request cannot merge.
 
-```bash
-# Install Playwright Test (same as web automation)
-npm install -D @playwright/test
+## Scaling to more endpoints
 
-# For API testing, you don't need browsers, but if you want them:
-npx playwright install
+The API prompt walks every documented response under the Swagger `paths` object. A new path, or a new status on an existing path, becomes one more test without a new script. The end-to-end generator discovers each `page.tsx` and asks for two flows per page. Adding a page means adding that file, not editing the workflow.
 
-# Or install only Playwright core for API-only testing
-npm install -D playwright-core
-```
+## Incorrect generated tests
 
-### Additional Setup
+Generation uses `temperature` 0. The API prompt may use only paths, statuses, and fields from the Swagger file, and the generator requires one test per documented response. The end-to-end prompt may use only fields, selectors, and visible text from the page source, and the generator requires two tests per page, `pressSequentially`, no selectors in the spec, and no `blur()` or `test.skip`. A reply that breaks these rules, or that contains the API key, is not saved and the workflow fails. A test that is saved and still wrong fails against the running API or checkout page, which fails the pull request.
 
-```bash
-# Install TypeScript (recommended)
-npm install -D typescript
+## Flaky tests
 
-# Install additional types if needed
-npm install -D @types/node
-```
+API checks are single HTTP calls. UI checks wait with Playwright `expect` rather than a fixed sleep. The checkout app is started with `next start` so the dev HMR socket cannot block hydration. CI retries twice. A test that still flakes should be quarantined with a linked issue and a deadline, not left as `test.skip` inside the generator, which rejects skips.
 
-## 🏃‍♂️ Running Tests
+## End-to-end selectors
 
-```bash
-# Run all tests
-npm test
+The prompt forbids label and role lookups for the inputs because the visible labels are not tied to the fields. Locators use `input[name="..."]` from the page source, and the pay button uses the accessible name `/Pay|Complete Payment/`. Assertions use a visible substring from that same source, so a class or layout change does not break the test. Typing goes through the keyboard so React `onChange` runs before Tab fires `onBlur`.
 
-# Run web tests only
-npm run test:web
+## Secrets
 
-# Run API tests only
-npm run test:api
-
-# Run with UI mode
-npm run test:ui
-
-# Run in debug mode
-npm run test:debug
-
-# Run on specific environment
-npm run test:staging
-npm run test:uat
-```
-
-## 📁 Project Structure
-
-```
-├── config/
-│   └── environment.ts      # Environment configurations
-├── page-objects/
-│   ├── base-page.ts       # Base page object class
-│   └── home-page.ts       # Example page object
-├── tests/
-│   ├── api/
-│   │   └── example-api.spec.ts    # API test examples
-│   └── web/
-│       └── example-web.spec.ts    # Web test examples
-├── utils/
-│   ├── api-helper.ts      # API testing utilities
-│   └── test-utils.ts      # Common test utilities
-├── docs/
-│   └── getting-started.md # Detailed documentation
-├── playwright.config.ts   # Playwright configuration
-├── package.json
-├── tsconfig.json
-└── .env.example           # Environment variables template
-```
-
-## 📖 Usage Examples
-
-### Web Testing
-
-```typescript
-import { test, expect } from '@playwright/test';
-import { HomePage } from '../page-objects/home-page';
-
-test('homepage loads correctly', async ({ page }) => {
-    const homePage = new HomePage(page);
-    await homePage.goto();
-    await expect(await homePage.isLoaded()).toBe(true);
-});
-```
-
-### API Testing
-
-```typescript
-import { test, expect } from '@playwright/test';
-import { ApiHelper } from '../utils/api-helper';
-
-test('API health check', async ({ request }) => {
-    const apiHelper = new ApiHelper(request, 'your-api-key');
-    const response = await apiHelper.get('/health');
-    expect(response.status()).toBe(200);
-});
-```
-
-## 🔧 Configuration
-
-### Environment Variables
-
-Copy `.env.example` to `.env` and configure:
-
-```bash
-TEST_ENV=staging
-API_SECRET_KEY=your-secret-api-key
-```
-
-### Browser Configuration
-
-Tests run on multiple browsers by default:
-
-- Chromium (Chrome/Edge)
-- Firefox
-- WebKit (Safari)
-
-## 📊 Reporting
-
-View test reports after execution:
-
-```bash
-npm run report
-```
-
-Reports include:
-
-- HTML report with test results
-- Screenshots on failures
-- Video recordings (if enabled)
-- Trace files for debugging
-
-## 🔍 Debugging
-
-```bash
-# Visual debugging with browser
-npm run test:headed
-
-# Step-through debugging
-npm run test:debug
-
-# Generate test code
-npm run codegen
-```
-
-## 🤝 Contributing
-
-1. Follow the existing code structure
-2. Add tests for new features
-3. Update documentation as needed
-4. Run linting before committing:
-    ```bash
-    npm run lint
-    npm run format:check
-    ```
-
-## 📋 Available Scripts
-
-### Verify Installation
-
-```bash
-# Run sample tests
-npx playwright test
-
-# Generate code for web automation
-npx playwright codegen
-
-# Show installed browsers
-npx playwright --version
-```
-
-## 🆘 Support
-
-- Check the [Getting Started Guide](./docs/getting-started.md)
-- Review example test files
-
-## 📄 License
-
-MIT License - see LICENSE file for details
+The Gemini key is never written into the repo or into generated tests. Locally, export `GEMINI_API_KEY` in the shell. In GitHub Actions it is the repository secret `GEMINI_API_KEY`, passed only into the two generation steps. `GEMINI_MODEL` is optional. The generator tries `gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite`, then `gemini-3.8-flash`. If every model is unavailable, generation exits with an error and the workflow fails.
